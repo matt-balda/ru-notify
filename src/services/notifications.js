@@ -26,7 +26,15 @@ export async function hasExactAlarmPermission() {
   return settings.android.alarm === AndroidNotificationSetting.ENABLED;
 }
 
+// Notifee rejects a trigger that isn't in the future, and callers decide
+// what's still ahead from a `now` taken before a fetch that can take seconds;
+// a slot that passed meanwhile is skipped instead (returns false).
+const MIN_TRIGGER_LEAD_MS = 1000;
+
 export async function scheduleTriggerNotification({id, title, body, date}) {
+  if (date.getTime() <= Date.now() + MIN_TRIGGER_LEAD_MS) {
+    return false;
+  }
   // Notifee silently drops a trigger notification instead of scheduling it if
   // an *exact* AlarmType is requested but the "Alarms & reminders" permission
   // hasn't been granted. Falling back to the non-exact (but still
@@ -53,6 +61,7 @@ export async function scheduleTriggerNotification({id, title, body, date}) {
       },
     },
   );
+  return true;
 }
 
 export async function displayImmediateNotification({id, title, body}) {
@@ -63,14 +72,19 @@ export async function displayImmediateNotification({id, title, body}) {
     android: {
       channelId: CHANNEL_ID,
       pressAction: {id: 'default'},
+      // Re-posting the same id (e.g. a retried job) updates it silently.
+      onlyAlertOnce: true,
     },
   });
 }
 
+// Cancels every pending menu notification and returns the ids that were
+// still pending, i.e. hadn't fired yet.
 export async function cancelAllScheduledMenuNotifications() {
   const triggerIds = await notifee.getTriggerNotificationIds();
   const toCancel = triggerIds.filter(id => id.startsWith(NOTIFICATION_ID_PREFIX));
   if (toCancel.length) {
     await notifee.cancelTriggerNotifications(toCancel);
   }
+  return toCancel;
 }

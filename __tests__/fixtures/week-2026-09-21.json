@@ -1,0 +1,156 @@
+{
+  "lunch": [
+    {
+      "weekday": "Segunda",
+      "date": "21/09",
+      "dishes": [
+        "Arroz Branco/ Integral",
+        "Feijão Preto",
+        "Bife de Frango grelhado",
+        "Proteína de soja ao sugo",
+        "Polenta",
+        "Salada Verde",
+        "Salada gaúcha",
+        "Molho Agridoce",
+        "Fruta"
+      ]
+    },
+    {
+      "weekday": "Terça",
+      "date": "22/09",
+      "dishes": [
+        "Arroz Branco/ Integral",
+        "Lentilha",
+        "Strogonoff de frango",
+        "Bolinho de feijões coloridos",
+        "Batata palha",
+        "Salada Verde",
+        "Cenoura ralada",
+        "Molho de Mostarda e mel",
+        "Doce / Fruta"
+      ]
+    },
+    {
+      "weekday": "Quarta",
+      "date": "23/09",
+      "dishes": [
+        "Arroz Branco/ Integral",
+        "Feijão Preto",
+        "Lombo suíno a california",
+        "Proteína de soja ao molho barbecue",
+        "Legumes sautê",
+        "Salada Verde",
+        "Beterraba",
+        "Molho de Ervas",
+        "Fruta"
+      ]
+    },
+    {
+      "weekday": "Quinta",
+      "date": "24/09",
+      "dishes": [
+        "Arroz Branco/ Integral",
+        "Feijão Carioca",
+        "Sobrecoxa de frango assada",
+        "Ervilha com legumes",
+        "Moranga refogada",
+        "Salada Verde",
+        "Tomate",
+        "Molho de Alho",
+        "Fruta"
+      ]
+    },
+    {
+      "weekday": "Sexta",
+      "date": "25/09",
+      "dishes": [
+        "Arroz Branco/ Integral",
+        "Feijão Preto",
+        "Bife bovino à milanesa",
+        "Falafel",
+        "Macarrão ao alho e óleo",
+        "Salada Verde",
+        "Repolho roxo",
+        "Molho Vinagrete",
+        "Fruta"
+      ]
+    }
+  ],
+  "dinner": [
+    {
+      "weekday": "Segunda",
+      "date": "21/09",
+      "dishes": [
+        "Arroz Branco/ Integral",
+        "Feijão Preto",
+        "Bife de frango grelhado",
+        "Torta de ervilha",
+        "Couve refogada",
+        "Salada Verde",
+        "Salada Gaúcha",
+        "Molho de Alho",
+        "Fruta"
+      ]
+    },
+    {
+      "weekday": "Terça",
+      "date": "22/09",
+      "dishes": [
+        "Arroz branco/ Integral",
+        "Feijão Preto",
+        "Filé de peixe empanado",
+        "Mix de grãos",
+        "Moranga refogada",
+        "Salada Verde",
+        "Abobrinha ralada",
+        "Molho de Limão com ervas",
+        "Fruta"
+      ]
+    },
+    {
+      "weekday": "Quarta",
+      "date": "23/09",
+      "dishes": [
+        "Arroz Branco/ Integral",
+        "Lentilha",
+        "Filé de frango a milanesa",
+        "Bobó de grão de bico",
+        "Macarrão com molho de tomate e manjericão",
+        "Salada Verde",
+        "Chuchu com cenoura",
+        "Molho Mostarda e mel",
+        "Fruta"
+      ]
+    },
+    {
+      "weekday": "Quinta",
+      "date": "24/09",
+      "dishes": [
+        "Arroz Branco/ Integral",
+        "Feijão Carioca",
+        "Carne bovina assada",
+        "Lentilha com cebola caramelada",
+        "Farofa salgada",
+        "Salada Verde",
+        "Beterraba",
+        "Molho Rose",
+        "Doce / Fruta"
+      ]
+    },
+    {
+      "weekday": "Sexta",
+      "date": "25/09",
+      "dishes": [
+        "Arroz branco/ Interal",
+        "Feijão Preto",
+        "Fricassê",
+        "Strogonoff de Proteína de Soja",
+        "Batata palha",
+        "Salada Verde",
+        "Cenoura",
+        "Molho de Pimenta",
+        "Fruta"
+      ]
+    }
+  ]
+}

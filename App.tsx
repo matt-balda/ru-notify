@@ -8,6 +8,8 @@ import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
   Alert,
+  AppState,
+  BackHandler,
   Platform,
   RefreshControl,
   ScrollView,
@@ -23,47 +25,34 @@ import type {ScrollViewInstance} from 'react-native';
 import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 import BackgroundFetch from 'react-native-background-fetch';
 import {MEAL_TIMES, WEEKDAY_ORDER} from './src/constants';
-import {isFishDish} from './src/utils/fishDetector';
-import {getProteinKind} from './src/utils/protein';
+import {findWorstDishIndex, getProteinKind} from './src/utils/protein';
 import {findTodayIndex, formatDayMonth, isWeekend} from './src/utils/today';
 import {ensureNotificationSetup} from './src/services/notifications';
 import {
+  DEFAULT_PREFERENCES,
+  formatTime,
+  getPreferences,
+  savedWorstProtein,
+} from './src/services/preferences';
+import {listProteins} from './src/db/proteinsDb';
+import {
+  applyPreferences,
   checkAndRunWeeklyJob,
   getCachedWeekMenu,
   runWeeklyMenuJob,
+  subscribeToWeekUpdates,
 } from './src/services/scheduler';
-
-const SERIF_FONT = Platform.select({ios: 'Georgia', default: 'serif'});
-
-const LIGHT_COLORS = {
-  bg: '#f7f1e4',
-  surface: '#fffbf2',
-  text: '#2a231b',
-  textSoft: '#6f6152',
-  textFaint: '#9a8d7c',
-  border: 'rgba(42,35,27,0.16)',
-  borderStrong: 'rgba(42,35,27,0.30)',
-  accent: '#7c2d3a',
-  accentSoft: '#f0ddb8',
-  fishText: '#5c1f29',
-  olive: '#65703f',
-};
-
-const DARK_COLORS = {
-  bg: '#1c1712',
-  surface: '#26201a',
-  text: '#f2e9da',
-  textSoft: '#bdaf9b',
-  textFaint: '#8a7c69',
-  border: 'rgba(242,233,218,0.14)',
-  borderStrong: 'rgba(242,233,218,0.26)',
-  accent: '#e0a458',
-  accentSoft: 'rgba(224,164,88,0.16)',
-  fishText: '#e0a458',
-  olive: '#a9b087',
-};
-
-type ColorTokens = typeof LIGHT_COLORS;
+import {
+  PreferencesScreen,
+  type Preferences,
+  type Protein,
+} from './src/components/PreferencesScreen';
+import {
+  DARK_COLORS,
+  LIGHT_COLORS,
+  SERIF_FONT,
+  type ColorTokens,
+} from './src/theme';
 
 // Space left above a day card when jumping to it, so it doesn't sit flush
 // against the top edge.
@@ -111,13 +100,35 @@ function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // null until the first-launch setup is done; the setup screen shows until then.
+  const [prefs, setPrefs] = useState<Preferences | null>(null);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+  const [editingPrefs, setEditingPrefs] = useState(false);
+  const [proteins, setProteins] = useState<Protein[]>([]);
+  const [proteinsError, setProteinsError] = useState<string | null>(null);
+
   const scrollRef = useRef<ScrollViewInstance>(null);
   // Day cards are laid out inside dayList, so their onLayout y is relative to
   // it; dayList's own y is relative to the scroll content.
   const dayListY = useRef(0);
   const dayCardY = useRef<number[]>([]);
 
+  const loadProteins = useCallback(async () => {
+    try {
+      setProteins(await listProteins());
+      setProteinsError(null);
+    } catch (e: any) {
+      console.warn('[RUNotify] Falha ao ler o banco de proteínas:', e);
+      setProteinsError('Não foi possível carregar a lista de pratos.');
+    }
+  }, []);
+
   const bootstrap = useCallback(async () => {
+    // Decide between the setup screen and the menu before anything slow.
+    setPrefs(await getPreferences());
+    setPrefsLoaded(true);
+    await loadProteins();
+
     await ensureNotificationSetup();
     await configureBackgroundFetch();
 
@@ -131,6 +142,9 @@ function App() {
       if (fresh) {
         setWeekData(fresh);
       }
+      // A fetch - or the cached week, when none was due - may have added
+      // this week's new dishes.
+      await loadProteins();
     } catch (e: any) {
       if (!cached) {
         setError(e?.message ?? 'Falha ao buscar o cardápio.');
@@ -138,11 +152,42 @@ function App() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadProteins]);
 
   useEffect(() => {
     bootstrap();
   }, [bootstrap]);
+
+  // A weekly job run by the background fetch while the app is open.
+  useEffect(
+    () =>
+      subscribeToWeekUpdates((fresh: any) => {
+        setWeekData(fresh);
+        loadProteins();
+      }),
+    [loadProteins],
+  );
+
+  // Back from the background (Android often keeps the app alive for days):
+  // pick up what a background run stored, and run the job if it's now due.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', async state => {
+      if (state !== 'active') {
+        return;
+      }
+      try {
+        const cached = await getCachedWeekMenu();
+        if (cached) {
+          setWeekData(cached);
+        }
+        await checkAndRunWeeklyJob(new Date());
+      } catch (e) {
+        console.warn('[RUNotify] Falha ao atualizar ao voltar para o app:', e);
+      }
+      await loadProteins();
+    });
+    return () => sub.remove();
+  }, [loadProteins]);
 
   const handleRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -150,12 +195,35 @@ function App() {
     try {
       const fresh = await runWeeklyMenuJob(new Date());
       setWeekData(fresh);
+      await loadProteins();
     } catch (e: any) {
       setError(e?.message ?? 'Falha ao buscar o cardápio.');
     } finally {
       setRefreshing(false);
     }
+  }, [loadProteins]);
+
+  const handleSavePrefs = useCallback(async (next: Preferences) => {
+    const saved = await applyPreferences(next);
+    setPrefs(saved);
+    setEditingPrefs(false);
   }, []);
+
+  const handleEditPrefs = useCallback(() => {
+    loadProteins(); // show the list as the database has it now
+    setEditingPrefs(true);
+  }, [loadProteins]);
+
+  useEffect(() => {
+    if (!editingPrefs) {
+      return;
+    }
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setEditingPrefs(false);
+      return true;
+    });
+    return () => sub.remove();
+  }, [editingPrefs]);
 
   const handleJumpToToday = useCallback(() => {
     const now = new Date();
@@ -185,6 +253,36 @@ function App() {
   const weekRangeLabel =
     firstDate && lastDate ? `Semana de ${firstDate} a ${lastDate}` : 'Semana';
 
+  // The saved copy stands in while the list loads or can't be read.
+  const worstProtein = prefs
+    ? proteins.find(p => p.id === prefs.worstProteinId) ?? savedWorstProtein(prefs)
+    : null;
+
+  const showSetup = prefsLoaded && !prefs;
+  if (!prefsLoaded || showSetup || editingPrefs) {
+    return (
+      <SafeAreaProvider>
+        <SafeAreaView style={[styles.safeArea, {backgroundColor: colors.bg}]}>
+          <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+          {prefsLoaded && (
+            <PreferencesScreen
+              mode={showSetup ? 'setup' : 'edit'}
+              colors={colors}
+              initial={prefs ?? DEFAULT_PREFERENCES}
+              proteins={proteins}
+              proteinsLoading={loading}
+              proteinsError={proteinsError}
+              currentWeekKey={weekData?.weekKey ?? null}
+              onRetryProteins={loadProteins}
+              onSave={handleSavePrefs}
+              onCancel={showSetup ? undefined : () => setEditingPrefs(false)}
+            />
+          )}
+        </SafeAreaView>
+      </SafeAreaProvider>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <SafeAreaView style={[styles.safeArea, {backgroundColor: colors.bg}]}>
@@ -212,6 +310,39 @@ function App() {
               <View style={styles.ruleLine} />
             </View>
           </View>
+
+          {prefs && (
+            <View style={styles.prefsStrip}>
+              <View style={styles.prefsStripBody}>
+                <Text style={styles.prefsStripLabel}>Seus avisos</Text>
+                <Text style={styles.prefsStripText}>
+                  Almoço {formatTime(prefs.lunchTime)} · Janta{' '}
+                  {formatTime(prefs.dinnerTime)}
+                </Text>
+                <Text style={styles.prefsStripText}>
+                  {worstProtein ? (
+                    <>
+                      Pior cardápio:{' '}
+                      <Text style={styles.prefsStripStrong}>
+                        {worstProtein.name}
+                      </Text>{' '}
+                      · {prefs.advanceNoticeHours}h antes
+                    </>
+                  ) : (
+                    'Nenhum pior cardápio escolhido'
+                  )}
+                </Text>
+              </View>
+              <TouchableOpacity
+                style={styles.editBtn}
+                onPress={handleEditPrefs}
+                activeOpacity={0.8}
+                accessibilityRole="button"
+                accessibilityLabel="Editar preferências de aviso">
+                <Text style={styles.editBtnText}>EDITAR</Text>
+              </TouchableOpacity>
+            </View>
+          )}
 
           {isInitialLoading && (
             <View style={styles.statePanel}>
@@ -312,6 +443,10 @@ function App() {
                       if (!day) {
                         return null;
                       }
+                      const worstIndex = findWorstDishIndex(
+                        day.dishes,
+                        worstProtein?.normalizedName,
+                      );
                       return (
                         <React.Fragment key={meal}>
                           {mealIndex > 0 && <View style={styles.mealDivider} />}
@@ -321,17 +456,14 @@ function App() {
                             </Text>
                             <View style={styles.dishList}>
                               {day.dishes.map((dish: string, i: number) => {
-                                if (isFishDish(dish)) {
+                                if (i === worstIndex) {
                                   return (
                                     <View key={i} style={styles.fishDish}>
-                                      {/* <Text style={styles.fishSealLabel}>
-                                        
-                                      </Text> */}
                                       <Text style={styles.fishDishName}>
                                         {dish}
                                       </Text>
                                       <Text style={styles.fishDishTag}>
-                                        Proteína do dia
+                                        Seu pior cardápio
                                       </Text>
                                     </View>
                                   );
@@ -483,6 +615,44 @@ function createStyles(colors: ColorTokens) {
       letterSpacing: 0.5,
       textTransform: 'uppercase',
       color: colors.bg,
+    },
+
+    prefsStrip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.border,
+      borderRadius: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
+      marginTop: 10,
+      marginBottom: 14,
+    },
+    prefsStripBody: {flex: 1, gap: 2},
+    prefsStripLabel: {
+      fontSize: 10.5,
+      fontWeight: '700',
+      letterSpacing: 1,
+      textTransform: 'uppercase',
+      color: colors.olive,
+      marginBottom: 2,
+    },
+    prefsStripText: {fontSize: 12.5, lineHeight: 17, color: colors.textSoft},
+    prefsStripStrong: {fontWeight: '700', color: colors.text},
+    editBtn: {
+      borderWidth: 1,
+      borderColor: colors.accent,
+      borderRadius: 999,
+      paddingVertical: 8,
+      paddingHorizontal: 14,
+    },
+    editBtnText: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      color: colors.accent,
     },
 
     metaRow: {
@@ -643,13 +813,6 @@ function createStyles(colors: ColorTokens) {
       borderRadius: 8,
       padding: 12,
       marginVertical: 2,
-    },
-    fishSealLabel: {
-      fontFamily: SERIF_FONT,
-      fontStyle: 'italic',
-      fontWeight: '600',
-      fontSize: 11.5,
-      color: colors.fishText,
     },
     fishDishName: {
       fontFamily: SERIF_FONT,
