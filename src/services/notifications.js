@@ -26,10 +26,6 @@ export async function hasExactAlarmPermission() {
   return settings.android.alarm === AndroidNotificationSetting.ENABLED;
 }
 
-export async function openExactAlarmSettings() {
-  await notifee.openAlarmPermissionSettings();
-}
-
 export async function scheduleTriggerNotification({id, title, body, date}) {
   // Notifee silently drops a trigger notification instead of scheduling it if
   // an *exact* AlarmType is requested but the "Alarms & reminders" permission
