@@ -40,6 +40,12 @@ async function fetchMenuHtml() {
       return await response.text();
     } catch (error) {
       lastError = error;
+      console.warn(
+        `[RUNotify] fetch attempt ${attempt}/${MENU_FETCH_MAX_ATTEMPTS} failed:`,
+        error?.name,
+        error?.message,
+        error?.cause,
+      );
       if (attempt < MENU_FETCH_MAX_ATTEMPTS) {
         await sleep(MENU_FETCH_RETRY_DELAY_MS * attempt);
       }
