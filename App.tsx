@@ -4,23 +4,28 @@
  * @format
  */
 
-import React, {useCallback, useEffect, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   RefreshControl,
   ScrollView,
   StatusBar,
   StyleSheet,
   Text,
+  ToastAndroid,
   TouchableOpacity,
   useColorScheme,
   View,
 } from 'react-native';
+import type {ScrollViewInstance} from 'react-native';
 import {SafeAreaProvider, SafeAreaView} from 'react-native-safe-area-context';
 import BackgroundFetch from 'react-native-background-fetch';
 import {MEAL_TIMES, WEEKDAY_ORDER} from './src/constants';
 import {isFishDish} from './src/utils/fishDetector';
+import {getProteinKind} from './src/utils/protein';
+import {findTodayIndex, formatDayMonth, isWeekend} from './src/utils/today';
 import {ensureNotificationSetup} from './src/services/notifications';
 import {
   checkAndRunWeeklyJob,
@@ -60,6 +65,18 @@ const DARK_COLORS = {
 
 type ColorTokens = typeof LIGHT_COLORS;
 
+// Space left above a day card when jumping to it, so it doesn't sit flush
+// against the top edge.
+const JUMP_TOP_GAP = 12;
+
+function showHint(message: string) {
+  if (Platform.OS === 'android') {
+    ToastAndroid.show(message, ToastAndroid.LONG);
+  } else {
+    Alert.alert('Hoje', message);
+  }
+}
+
 async function configureBackgroundFetch() {
   await BackgroundFetch.configure(
     {
@@ -93,6 +110,12 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  // Day cards are laid out inside dayList, so their onLayout y is relative to
+  // it; dayList's own y is relative to the scroll content.
+  const dayListY = useRef(0);
+  const dayCardY = useRef<number[]>([]);
 
   const bootstrap = useCallback(async () => {
     await ensureNotificationSetup();
@@ -134,6 +157,26 @@ function App() {
     }
   }, []);
 
+  const handleJumpToToday = useCallback(() => {
+    const now = new Date();
+    const index = findTodayIndex(weekData?.menu, now);
+    const cardY = index === null ? undefined : dayCardY.current[index];
+    if (cardY === undefined) {
+      showHint(
+        isWeekend(now)
+          ? 'Hoje não tem cardápio: o RU06 não abre no fim de semana.'
+          : `O cardápio de hoje (${formatDayMonth(
+              now,
+            )}) não está nesta semana. Toque em Atualizar.`,
+      );
+      return;
+    }
+    scrollRef.current?.scrollTo({
+      y: Math.max(0, dayListY.current + cardY - JUMP_TOP_GAP),
+      animated: true,
+    });
+  }, [weekData]);
+
   const isInitialLoading = loading && !weekData;
   const isBlockingError = !!error && !weekData;
 
@@ -147,6 +190,7 @@ function App() {
       <SafeAreaView style={[styles.safeArea, {backgroundColor: colors.bg}]}>
         <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={styles.scrollContent}
           refreshControl={
             <RefreshControl
@@ -158,9 +202,9 @@ function App() {
           }>
           <View style={styles.header}>
             <Text style={styles.brandTitle}>RU06</Text>
-            <Text style={styles.brandSub}>RU Vale · Informática — UFRGS</Text>
+            <Text style={styles.brandSub}>RU Vale · UFRGS</Text>
             <Text style={styles.hoursRow}>
-              Almoço 11:00–14:00 · Janta 17:30–19:00
+              Almoço 11:00-14:00 | Janta 17:30-19:00
             </Text>
             <View style={styles.ruleOrn}>
               <View style={styles.ruleLine} />
@@ -210,14 +254,22 @@ function App() {
                   Atualizado em{' '}
                   {new Date(weekData.fetchedAt).toLocaleString('pt-BR')}
                 </Text>
-                <TouchableOpacity
-                  style={styles.refreshBtn}
-                  onPress={handleRefresh}
-                  activeOpacity={0.8}>
-                  <Text style={styles.refreshBtnText}>
-                    {refreshing ? 'ATUALIZANDO…' : 'ATUALIZAR'}
-                  </Text>
-                </TouchableOpacity>
+                <View style={styles.metaActions}>
+                  <TouchableOpacity
+                    style={styles.todayBtn}
+                    onPress={handleJumpToToday}
+                    activeOpacity={0.8}>
+                    <Text style={styles.todayBtnText}>HOJE</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.refreshBtn}
+                    onPress={handleRefresh}
+                    activeOpacity={0.8}>
+                    <Text style={styles.refreshBtnText}>
+                      {refreshing ? 'ATUALIZANDO…' : 'ATUALIZAR'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               {!!error && (
@@ -233,9 +285,18 @@ function App() {
                 </Text>
               </View>
 
-              <View style={styles.dayList}>
+              <View
+                style={styles.dayList}
+                onLayout={e => {
+                  dayListY.current = e.nativeEvent.layout.y;
+                }}>
                 {WEEKDAY_ORDER.map((weekday, dayIndex) => (
-                  <View key={weekday} style={styles.dayCard}>
+                  <View
+                    key={weekday}
+                    style={styles.dayCard}
+                    onLayout={e => {
+                      dayCardY.current[dayIndex] = e.nativeEvent.layout.y;
+                    }}>
                     <View style={styles.dayCardAccentBar} />
                     <View style={styles.dayCardHead}>
                       <Text style={styles.dayName}>{weekday}</Text>
@@ -259,25 +320,52 @@ function App() {
                               {MEAL_TIMES[meal].label}
                             </Text>
                             <View style={styles.dishList}>
-                              {day.dishes.map((dish: string, i: number) =>
-                                isFishDish(dish) ? (
-                                  <View key={i} style={styles.fishDish}>
-                                    <Text style={styles.fishSealLabel}>
-                                      🐟 Nota do chef
-                                    </Text>
-                                    <Text style={styles.fishDishName}>
-                                      {dish}
-                                    </Text>
-                                    <Text style={styles.fishDishTag}>
-                                      Proteína do dia
-                                    </Text>
-                                  </View>
-                                ) : (
+                              {day.dishes.map((dish: string, i: number) => {
+                                if (isFishDish(dish)) {
+                                  return (
+                                    <View key={i} style={styles.fishDish}>
+                                      {/* <Text style={styles.fishSealLabel}>
+                                        
+                                      </Text> */}
+                                      <Text style={styles.fishDishName}>
+                                        {dish}
+                                      </Text>
+                                      <Text style={styles.fishDishTag}>
+                                        Proteína do dia
+                                      </Text>
+                                    </View>
+                                  );
+                                }
+                                const proteinKind = getProteinKind(
+                                  day.dishes,
+                                  i,
+                                );
+                                if (proteinKind) {
+                                  return (
+                                    <View key={i} style={styles.proteinDish}>
+                                      <View
+                                        style={[
+                                          styles.proteinBar,
+                                          proteinKind === 'veggie' &&
+                                            styles.proteinBarVeggie,
+                                        ]}
+                                      />
+                                      <Text
+                                        style={[
+                                          styles.dishText,
+                                          styles.proteinDishText,
+                                        ]}>
+                                        {dish}
+                                      </Text>
+                                    </View>
+                                  );
+                                }
+                                return (
                                   <Text key={i} style={styles.dishText}>
                                     {dish}
                                   </Text>
-                                ),
-                              )}
+                                );
+                              })}
                             </View>
                           </View>
                         </React.Fragment>
@@ -287,7 +375,7 @@ function App() {
                 ))}
               </View>
 
-              <Text style={styles.footerNote}>— RU06 · Bom apetite —</Text>
+              <Text style={styles.footerNote}>RU06 · Bom apetite</Text>
             </>
           )}
         </ScrollView>
@@ -411,6 +499,21 @@ function createStyles(colors: ColorTokens) {
       color: colors.textFaint,
       flexShrink: 1,
     },
+    metaActions: {flexDirection: 'row', alignItems: 'center', gap: 8},
+    todayBtn: {
+      backgroundColor: colors.accent,
+      borderWidth: 1,
+      borderColor: colors.accent,
+      borderRadius: 999,
+      paddingVertical: 8,
+      paddingHorizontal: 16,
+    },
+    todayBtnText: {
+      fontSize: 11,
+      fontWeight: '700',
+      letterSpacing: 0.5,
+      color: colors.bg,
+    },
     refreshBtn: {
       borderWidth: 1,
       borderColor: colors.borderStrong,
@@ -521,6 +624,17 @@ function createStyles(colors: ColorTokens) {
       color: colors.text,
       lineHeight: 18,
     },
+    proteinDish: {flexDirection: 'row', alignItems: 'flex-start', gap: 7},
+    // Letter-height bar, lined up with the first line of the dish name.
+    proteinBar: {
+      width: 3,
+      height: 12,
+      marginTop: 3,
+      borderRadius: 1.5,
+      backgroundColor: colors.accent,
+    },
+    proteinBarVeggie: {backgroundColor: colors.olive},
+    proteinDishText: {flexShrink: 1},
     fishDish: {
       gap: 4,
       backgroundColor: colors.accentSoft,
